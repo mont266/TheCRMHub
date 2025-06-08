@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useMemo, ChangeEvent, useRef, useEffect } from 'react';
 import { ToolProps } from '../../types';
-import { ArrowLeftIcon, XMarkIcon } from '../icons';
+import { ArrowLeftIcon, XMarkIcon, BeakerIcon } from '../icons'; // Added BeakerIcon for WIP
 
 const CHECKMARK_SVG_DATA_URI = "data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e";
 const SIGNIFICANCE_THRESHOLD = 0.05; // p < 0.05 for 95% confidence
@@ -1293,6 +1293,20 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
           <ArrowLeftIcon className="w-4 h-4 mr-1" />
           Back to Hub
         </button>
+      </div>
+      
+      <div 
+        className="mb-6 p-4 rounded-lg bg-amber-100 dark:bg-amber-800/30 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 flex items-center shadow"
+        role="alert"
+      >
+        <BeakerIcon className="w-6 h-6 mr-3 flex-shrink-0 text-amber-500 dark:text-amber-400" />
+        <div>
+          <p className="font-semibold text-sm sm:text-base">Work in Progress & Under Development</p>
+          <p className="text-xs sm:text-sm">
+            This tool is currently under active development. Features may be incomplete, experimental, or subject to change.
+            Your feedback is valuable during this phase!
+          </p>
+        </div>
       </div>
 
       {isDevToolsVisible && (

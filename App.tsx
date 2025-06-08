@@ -58,6 +58,7 @@ const App: React.FC = () => {
       description: 'Analyze A/B test performance, from engagement metrics to commercial impact, across various channels.',
       icon: <BeakerIcon />,
       component: TestAnalysisTool,
+      isWorkInProgress: true, // Mark as work in progress
     },
     // {
     //   id: 'data-analyzer',
@@ -150,7 +151,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-crm-background dark:bg-crm-dm-background transition-colors duration-300">
-      <Header theme={theme} toggleTheme={toggleTheme} />
+      <Header theme={theme} toggleTheme={toggleTheme} onLogoClick={handleCloseTool} />
       <main className="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
         {ActiveToolComponent ? (
           <ActiveToolComponent onClose={handleCloseTool} theme={theme} />

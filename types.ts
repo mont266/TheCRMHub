@@ -14,4 +14,5 @@ export interface CrmTool {
   icon: React.ReactNode;
   component?: React.FC<ToolProps>; // Optional: The React component for the tool
   action?: () => void; // Kept for tools without a dedicated component (or for quick actions)
+  isWorkInProgress?: boolean; // Optional: Flag for tools under development
 }

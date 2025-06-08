@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { CrmTool } from '../types';
-import { IconProps } from './icons'; // Import IconProps
+import { IconProps, BeakerIcon } from './icons'; // Import IconProps and BeakerIcon
 
 interface ToolCardProps {
   tool: CrmTool;
@@ -20,11 +20,26 @@ const ToolCard: React.FC<ToolCardProps> = ({ tool, onLaunch }) => {
   return (
     <div className="bg-crm-card dark:bg-crm-dm-card rounded-xl shadow-lg dark:shadow-2xl overflow-hidden transform transition-all duration-300 hover:scale-105 hover:shadow-2xl flex flex-col">
       <div className="p-6 flex-grow">
-        <div className="flex items-center mb-4">
-          <div className="p-3 rounded-full bg-crm-icon-bg dark:bg-crm-dm-icon-bg mr-4 transition-colors duration-300">
+        <div className="flex items-start mb-4"> {/* Changed to items-start for better alignment with badge */}
+          <div className="p-3 rounded-full bg-crm-icon-bg dark:bg-crm-dm-icon-bg mr-4 transition-colors duration-300 flex-shrink-0">
             {React.cloneElement(tool.icon as React.ReactElement<IconProps>, { className: "w-8 h-8 text-crm-accent" })}
           </div>
-          <h3 className="text-xl font-semibold text-crm-text-body dark:text-crm-dm-text-body transition-colors duration-300">{tool.name}</h3>
+          <div className="flex-grow">
+            <div className="flex items-center space-x-2">
+              <h3 className="text-xl font-semibold text-crm-text-body dark:text-crm-dm-text-body transition-colors duration-300">
+                {tool.name}
+              </h3>
+              {tool.isWorkInProgress && (
+                <span 
+                  className="flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-700 dark:text-amber-100"
+                  title="Work in Progress"
+                >
+                  <BeakerIcon className="w-3 h-3 mr-1" />
+                  WIP
+                </span>
+              )}
+            </div>
+          </div>
         </div>
         <p className="text-crm-text-muted dark:text-crm-dm-text-muted text-sm mb-4 leading-relaxed transition-colors duration-300">
           {tool.description}
