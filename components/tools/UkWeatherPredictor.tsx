@@ -224,6 +224,9 @@ const UkWeatherPredictor: React.FC<ToolProps> = ({ onClose, theme }) => {
     }, [isDevToolsVisible, loadDevThresholds, loadManualOverrides]);
 
     const handleFetchWeatherData = useCallback(async () => {
+        if (typeof window.gtag === 'function') {
+            window.gtag('event', 'fetch_weather_data');
+        }
         if (!API_KEY) { 
             setFetchStatusMessage('Error: API Key not configured.'); setIsLoading(false); return;
         }

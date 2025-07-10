@@ -54,6 +54,14 @@ const BrazeThresholdCalculator: React.FC<ToolProps> = ({ onClose, theme }) => {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'calculate_thresholds', {
+        'send_volume': parseFloat(sendVolume) || 0,
+        'global_control': globalControl,
+        'has_send_limit': hasSendLimit,
+        'daily_send_limit': parseFloat(dailySendLimit) || 0,
+      });
+    }
     calculateThresholds(); 
     setIsCalculating(true);
     setTimeout(() => {

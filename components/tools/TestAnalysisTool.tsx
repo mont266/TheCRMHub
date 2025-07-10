@@ -159,8 +159,10 @@ function calculateRateAndSignificance(
 
 const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   const [currentStep, setCurrentStep] = useState(1);
+  const [testName, setTestName] = useState<string>('');
   const [testType, setTestType] = useState<TestType>('engagement');
   const [channel, setChannel] = useState<Channel>('email');
+  const [primaryEngagementMetric, setPrimaryEngagementMetric] = useState<'openRate' | 'clickThroughRate'>('clickThroughRate');
   
   const [variantsData, setVariantsData] = useState<Variant[]>([
     createNewVariant(0, 'Variant A'),
@@ -182,6 +184,8 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   const backToHubButtonRef = useRef<HTMLButtonElement>(null);
   const [isReviewDetailsExpanded, setIsReviewDetailsExpanded] = useState<boolean>(false);
   const [testConclusion, setTestConclusion] = useState<TestConclusionData | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisProgressText, setAnalysisProgressText] = useState<string>('');
 
   const totalSteps = 4;
 
@@ -478,21 +482,39 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
     }
 
     const ctrKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'clickThroughRate', 'Click-Through Rate (CTR)', true, 'clickThroughRateSig');
-    if (ctrKpiInfo.isConclusive && parseMetricValue(ctrKpiInfo.winnerKpiValue) !== null) {
-        engagementWinnerInfo = ctrKpiInfo;
-        if (!winningKpiForHighlight) winningKpiForHighlight = ctrKpiInfo;
-    } else if (channel === 'email') {
-        const orKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'openRate', 'Open Rate (OR)', true, 'openRateSig');
-        if (orKpiInfo.isConclusive && parseMetricValue(orKpiInfo.winnerKpiValue) !== null) {
+    const orKpiInfo = channel === 'email' ? determineKpiWinner(allVariantRates, controlVariantId, 'openRate', 'Open Rate (OR)', true, 'openRateSig') : null;
+
+    const isCtrConclusive = ctrKpiInfo.isConclusive && parseMetricValue(ctrKpiInfo.winnerKpiValue) !== null;
+    const isOrConclusive = orKpiInfo && orKpiInfo.isConclusive && parseMetricValue(orKpiInfo.winnerKpiValue) !== null;
+
+    if (primaryEngagementMetric === 'openRate' && channel === 'email') {
+        if (isOrConclusive) {
             engagementWinnerInfo = orKpiInfo;
-            if (!winningKpiForHighlight) winningKpiForHighlight = orKpiInfo;
+        } else if (isCtrConclusive) {
+            engagementWinnerInfo = ctrKpiInfo;
+        }
+    } else { // Default to CTR priority
+        if (isCtrConclusive) {
+            engagementWinnerInfo = ctrKpiInfo;
+        } else if (isOrConclusive) {
+            engagementWinnerInfo = orKpiInfo;
         }
     }
     
+    if (engagementWinnerInfo && !winningKpiForHighlight) {
+        winningKpiForHighlight = engagementWinnerInfo;
+    }
+    
     if (engagementWinnerInfo?.isConclusive) {
+      const wasPrimaryMetricUsed = 
+        (primaryEngagementMetric === 'openRate' && engagementWinnerInfo.kpiDisplayName.includes('Open Rate')) ||
+        (primaryEngagementMetric === 'clickThroughRate' && engagementWinnerInfo.kpiDisplayName.includes('Click-Through Rate')) ||
+        channel === 'sms';
+
       summaryElements.push(
         <p key="eng-winner">
-          In terms of engagement, based on <strong>{engagementWinnerInfo.kpiDisplayName}</strong>,
+          For engagement, based on the 
+          <strong> {wasPrimaryMetricUsed ? 'primary metric ' : 'fallback metric '}{engagementWinnerInfo.kpiDisplayName}</strong>,
           <strong> {engagementWinnerInfo.winnerVariantName}</strong> led with <strong>{engagementWinnerInfo.winnerKpiValue}</strong>.
           {engagementWinnerInfo.performanceChangePercent !== null && engagementWinnerInfo.winnerVariantName !== controlName && (
             <>
@@ -586,15 +608,54 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
 
 
     return { summaryText: <div className="space-y-2 text-sm">{summaryElements}</div>, overallWinnerVariantName, isFlatResult, winningKpiPerformanceChange };
-  }, [allVariantRates, controlVariantId, channel, includeCommercial, conversionMetricName, currency, variantsData, is1066ModeActive]);
+  }, [allVariantRates, controlVariantId, channel, includeCommercial, conversionMetricName, currency, variantsData, is1066ModeActive, primaryEngagementMetric]);
 
 
   const handleNextStep = useCallback(() => {
-    if (currentStep === totalSteps -1) { 
+    if (currentStep === totalSteps - 1) { // Step 3 -> 4 transition
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', 'run_test_analysis', {
+          'test_channel': channel,
+          'include_commercial': includeCommercial,
+          'variant_count': variantsData.length,
+          'is_1066_mode': is1066ModeActive,
+        });
+      }
+
+      setIsAnalyzing(true);
+      
+      const analysisSteps = [
+        { text: 'Initializing analysis...', delay: 0 },
+        { text: 'Parsing variant data...', delay: 700 },
+        { text: 'Calculating engagement rates...', delay: 1500 },
+        { text: 'Assessing statistical significance...', delay: 2300 },
+      ];
+      
+      if (includeCommercial) {
+        analysisSteps.push({ text: 'Evaluating commercial impact...', delay: 3100 });
+      }
+
+      analysisSteps.push({ text: 'Generating final conclusion...', delay: 3800 });
+
+      analysisSteps.forEach(step => {
+        setTimeout(() => {
+          setAnalysisProgressText(step.text);
+        }, step.delay);
+      });
+      
+      const totalDelay = analysisSteps[analysisSteps.length - 1].delay + 1000;
+
+      setTimeout(() => {
         setTestConclusion(generateTestConclusion());
+        setIsAnalyzing(false);
+        setCurrentStep(totalSteps);
+      }, totalDelay);
+
+    } else {
+      setCurrentStep((prev) => Math.min(prev + 1, totalSteps));
     }
-    setCurrentStep((prev) => Math.min(prev + 1, totalSteps));
-  }, [currentStep, generateTestConclusion]);
+  }, [currentStep, generateTestConclusion, includeCommercial, channel, variantsData.length, is1066ModeActive]);
+
 
   const handlePrevStep = useCallback(() => {
     setCurrentStep((prev) => Math.max(prev - 1, 1));
@@ -663,6 +724,9 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   const handleFillWithRandomData = useCallback(() => {
     const newChannel = Math.random() < 0.5 ? 'email' : 'sms';
     setChannel(newChannel);
+    if (newChannel === 'sms') {
+      setPrimaryEngagementMetric('clickThroughRate');
+    }
 
     const newIncludeCommercial = Math.random() < 0.7; 
     setIncludeCommercial(newIncludeCommercial);
@@ -813,7 +877,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   const labelClasses = "block text-sm font-medium text-crm-text-body dark:text-crm-dm-text-body transition-colors duration-300";
   const cardClasses = "bg-crm-card dark:bg-crm-dm-card p-6 sm:p-8 rounded-xl shadow-xl dark:shadow-2xl transition-colors duration-300";
   const buttonClasses = "bg-gradient-to-r from-fuchsia-500 via-sky-400 to-violet-500 text-crm-button-text font-semibold py-2.5 px-4 rounded-lg hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-crm-accent transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed";
-  const secondaryButtonClasses = "bg-gray-200 dark:bg-gray-600 text-crm-text-body dark:text-crm-dm-text-body font-semibold py-2.5 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-crm-accent transition-all duration-300";
+  const secondaryButtonClasses = "bg-gray-200 dark:bg-gray-600 text-crm-text-body dark:text-crm-dm-text-body font-semibold py-2.5 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-crm-accent transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed";
   const tertiaryButtonClasses = "text-sm px-3 py-1.5 rounded-md transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-crm-accent focus:ring-offset-1";
   const checkboxLabelClasses = "ml-2 text-sm text-crm-text-body dark:text-crm-dm-text-body transition-colors duration-300 cursor-pointer";
 
@@ -951,11 +1015,35 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   };
 
 
+  const AnalysisLoadingScreen: React.FC = () => (
+    <div className="flex flex-col items-center justify-center min-h-[250px] text-center transition-opacity duration-300">
+      <svg className="animate-spin h-12 w-12 text-crm-accent mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <h3 className="text-xl font-semibold text-crm-text-heading dark:text-crm-dm-text-heading">Analyzing Test Data...</h3>
+      <p className="text-crm-text-muted dark:text-crm-dm-text-muted mt-2 w-full h-6 transition-all duration-300">
+        {analysisProgressText}
+      </p>
+    </div>
+  );
+
   const renderStepContent = () => {
     switch (currentStep) {
       case 1: 
         return (
           <div className="space-y-6">
+             <div>
+              <label htmlFor="testName" className={labelClasses}>Test Name (Optional)</label>
+              <input
+                type="text"
+                id="testName"
+                value={testName}
+                onChange={(e) => setTestName(e.target.value)}
+                className={inputClasses}
+                placeholder="e.g., Q3 Welcome Email Subject Line Test"
+              />
+            </div>
             <div>
               <label htmlFor="testType" className={labelClasses}>Test Type</label>
               <select id="testType" value={testType} onChange={(e) => setTestType(e.target.value as TestType)} className={inputClasses} disabled>
@@ -965,11 +1053,52 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
             </div>
             <div>
               <label htmlFor="channel" className={labelClasses}>Channel</label>
-              <select id="channel" value={channel} onChange={(e) => setChannel(e.target.value as Channel)} className={inputClasses}>
+              <select 
+                id="channel" 
+                value={channel} 
+                onChange={(e) => {
+                  const newChannel = e.target.value as Channel;
+                  setChannel(newChannel);
+                  if (newChannel === 'sms') {
+                    setPrimaryEngagementMetric('clickThroughRate');
+                  }
+                }} 
+                className={inputClasses}
+              >
                 <option value="email">Email</option>
                 <option value="sms">SMS</option>
               </select>
             </div>
+            {channel === 'email' && (
+              <div>
+                <label className={labelClasses}>Primary Engagement Metric</label>
+                <p className="mt-1 text-xs text-crm-text-muted dark:text-crm-dm-text-muted">Select the main KPI for engagement success.</p>
+                <div className="mt-2 flex flex-col sm:flex-row gap-2 sm:gap-4">
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="primaryEngagementMetric"
+                      value="clickThroughRate"
+                      checked={primaryEngagementMetric === 'clickThroughRate'}
+                      onChange={() => setPrimaryEngagementMetric('clickThroughRate')}
+                      className="h-4 w-4 text-crm-accent focus:ring-crm-accent border-crm-border dark:border-crm-dm-border bg-white dark:bg-slate-700"
+                    />
+                    <span className={checkboxLabelClasses}>Click-Through Rate (CTR)</span>
+                  </label>
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="primaryEngagementMetric"
+                      value="openRate"
+                      checked={primaryEngagementMetric === 'openRate'}
+                      onChange={() => setPrimaryEngagementMetric('openRate')}
+                      className="h-4 w-4 text-crm-accent focus:ring-crm-accent border-crm-border dark:border-crm-dm-border bg-white dark:bg-slate-700"
+                    />
+                    <span className={checkboxLabelClasses}>Open Rate (OR)</span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         );
       case 2: 
@@ -1108,7 +1237,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                 : 'border-crm-accent dark:border-fuchsia-400 bg-fuchsia-50 dark:bg-fuchsia-900/20'
               }`}>
                 <h3 className="text-lg font-semibold text-crm-text-heading dark:text-crm-dm-text-heading mb-2">
-                    Test Conclusion
+                   Test Conclusion{testName && `: `}<span className="text-crm-accent">{testName}</span>
                 </h3>
                 {testConclusion?.summaryText || <p>Generating conclusion...</p>}
             </div>
@@ -1353,30 +1482,32 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
         </div>
 
         <div className="min-h-[250px]"> 
-         {renderStepContent()}
+          {isAnalyzing ? <AnalysisLoadingScreen /> : renderStepContent()}
         </div>
 
         <div className="mt-8 pt-6 border-t border-crm-border dark:border-crm-dm-border flex justify-between items-center">
           <button
             onClick={handlePrevStep}
-            disabled={currentStep === 1}
+            disabled={currentStep === 1 || isAnalyzing}
             className={secondaryButtonClasses}
           >
             Previous
           </button>
           {currentStep < totalSteps ? (
-            <button onClick={handleNextStep} className={buttonClasses}>
+            <button onClick={handleNextStep} className={buttonClasses} disabled={isAnalyzing}>
               Next
             </button>
           ) : (
             <button 
                 onClick={() => {
                     setCurrentStep(1); 
+                    setTestName('');
                     setVariantsData([createNewVariant(0, 'Variant A'), createNewVariant(1, 'Variant B')].map(v => ({...v, ...initialMetrics}))); 
                     setControlVariantId('variant-0');
                     setNextVariantNumericId(2);
                     setIncludeCommercial(false);
                     setChannel('email');
+                    setPrimaryEngagementMetric('clickThroughRate');
                     setConversionMetricName('Purchases'); 
                     setMetricNameSelectionOption('custom'); 
                     setCurrency('GBP'); 

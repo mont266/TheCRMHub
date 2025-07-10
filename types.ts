@@ -16,3 +16,14 @@ export interface CrmTool {
   action?: () => void; // Kept for tools without a dedicated component (or for quick actions)
   isWorkInProgress?: boolean; // Optional: Flag for tools under development
 }
+
+// Add GA4 gtag function declaration to the window object
+declare global {
+  interface Window {
+    gtag?: (
+      command: 'event', 
+      action: string, 
+      params?: { [key: string]: any }
+    ) => void;
+  }
+}

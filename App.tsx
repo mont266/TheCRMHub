@@ -34,7 +34,13 @@ const App: React.FC = () => {
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
+    setTheme((prevTheme) => {
+      const newTheme = prevTheme === 'light' ? 'dark' : 'light';
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', 'toggle_theme', { 'theme': newTheme });
+      }
+      return newTheme;
+    });
   }, []);
   
   const tools: CrmTool[] = [
@@ -93,6 +99,12 @@ const App: React.FC = () => {
   const handleLaunchTool = (toolId: string) => {
     const toolToLaunch = tools.find(t => t.id === toolId);
     if (toolToLaunch && toolToLaunch.component) {
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', 'launch_tool', {
+          'tool_id': toolToLaunch.id,
+          'tool_name': toolToLaunch.name,
+        });
+      }
       setActiveToolId(toolId);
     } else if (toolToLaunch && toolToLaunch.action) {
         toolToLaunch.action(); // Fallback for older tools
@@ -102,6 +114,22 @@ const App: React.FC = () => {
   };
 
   const handleCloseTool = () => {
+    if (activeToolId) {
+       if (typeof window.gtag === 'function') {
+        const tool = tools.find(t => t.id === activeToolId);
+        window.gtag('event', 'close_tool', {
+          'tool_id': activeToolId,
+          'tool_name': tool?.name || 'unknown'
+        });
+      }
+    } else {
+      // This case handles clicking the logo when already on the main hub.
+      if (typeof window.gtag === 'function') {
+          window.gtag('event', 'navigate_home', {
+              'from_tool': 'none'
+          });
+      }
+    }
     setActiveToolId(null);
   };
 
