@@ -251,7 +251,7 @@ const PerformanceSummaryTable: React.FC<{
 
   if (includeCommercial) {
     if (is1066ModeActive) {
-      headers.push('SRR', 'MRR', 'Average IPP', 'CCT');
+      headers.push('SRR (%)', 'MRR (%)', 'Average IPP', 'CCT (%)');
     } else {
       headers.push(<>{conversionMetricName} <br /><span className="font-normal text-xs">(Conv. Rate)</span></>);
       headers.push(`Total Revenue (${currencySymbols[currency]})`);
@@ -497,7 +497,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                 srrRate = formatPercentageInput(variantData.srrRateInput);
                 mrrRate = formatPercentageInput(variantData.mrrRateInput);
                 averageIpp = formatAsCurrency(variantData.averageIppInput, selectedCurrency);
-                cct = formatAsCurrency(variantData.cctInput, selectedCurrency);
+                cct = formatPercentageInput(variantData.cctInput);
                 // No significance testing for 1066 direct inputs
             } else { // Generic commercial
                 if (uniqueClicksRaw !== null && uniqueClicksRaw > 0 && conversionsRaw !== null) {
@@ -613,7 +613,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
 
     if (includeCommercial && is1066ModeActive) {
         const ippKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'averageIpp', `Average IPP (${currencySymbols[currency]})`, true); 
-        const cctKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'cct', `CCT (${currencySymbols[currency]})`, true);
+        const cctKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'cct', 'CCT (%)', true);
         const srrKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'srrRate', 'SRR (%)', true);
         const mrrKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'mrrRate', 'MRR (%)', true);
 
@@ -637,8 +637,8 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
         } else summaryElements.push(<p key="ipp-sum-inconclusive">Avg. IPP analysis inconclusive.</p>);
         
         if (cctKpiInfo.isConclusive) {
-            summaryElements.push(<p key="cct-sum">CCT: <strong>{cctKpiInfo.winnerVariantName}</strong> at {cctKpiInfo.winnerKpiValue}.</p>);
-        } else summaryElements.push(<p key="cct-sum-inconclusive">CCT analysis inconclusive.</p>);
+            summaryElements.push(<p key="cct-sum">CCT (%): <strong>{cctKpiInfo.winnerVariantName}</strong> at {cctKpiInfo.winnerKpiValue}.</p>);
+        } else summaryElements.push(<p key="cct-sum-inconclusive">CCT (%) analysis inconclusive.</p>);
 
         if (srrKpiInfo.isConclusive) {
             summaryElements.push(<p key="srr-sum">SRR (%): <strong>{srrKpiInfo.winnerVariantName}</strong> at {srrKpiInfo.winnerKpiValue}.</p>);
@@ -1293,7 +1293,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
               <div><label htmlFor={`srrRateInput-${variant.id}`} className={labelClasses}>SRR (%)</label><input type="number" id={`srrRateInput-${variant.id}`} value={variant.srrRateInput} onChange={e => updateVariantMetric(variant.id, 'srrRateInput', e.target.value)} className={inputClasses} placeholder="e.g., 75" min="0" step="0.01"/></div>
               <div><label htmlFor={`mrrRateInput-${variant.id}`} className={labelClasses}>MRR (%)</label><input type="number" id={`mrrRateInput-${variant.id}`} value={variant.mrrRateInput} onChange={e => updateVariantMetric(variant.id, 'mrrRateInput', e.target.value)} className={inputClasses} placeholder="e.g., 60" min="0" step="0.01"/></div>
               <div><label htmlFor={`averageIppInput-${variant.id}`} className={labelClasses}>Average IPP ({currencySymbols[currency]})</label><input type="number" id={`averageIppInput-${variant.id}`} value={variant.averageIppInput} onChange={e => updateVariantMetric(variant.id, 'averageIppInput', e.target.value)} className={inputClasses} placeholder="e.g., 25.50" min="0" step="0.01"/></div>
-              <div><label htmlFor={`cctInput-${variant.id}`} className={labelClasses}>CCT ({currencySymbols[currency]})</label><input type="number" id={`cctInput-${variant.id}`} value={variant.cctInput} onChange={e => updateVariantMetric(variant.id, 'cctInput', e.target.value)} className={inputClasses} placeholder="e.g., 15.25" min="0" step="0.01"/></div>
+              <div><label htmlFor={`cctInput-${variant.id}`} className={labelClasses}>CCT (%)</label><input type="number" id={`cctInput-${variant.id}`} value={variant.cctInput} onChange={e => updateVariantMetric(variant.id, 'cctInput', e.target.value)} className={inputClasses} placeholder="e.g., 15.25" min="0" step="0.01"/></div>
             </>
           ) : ( // Generic Commercial Metrics
             <>
@@ -1509,7 +1509,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
             )}
             {includeCommercial && is1066ModeActive && ( 
                  <div>
-                    <label htmlFor="currencySelect1066" className={labelClasses}>Currency (for IPP & CCT)</label>
+                    <label htmlFor="currencySelect1066" className={labelClasses}>Currency (for IPP)</label>
                     <select 
                         id="currencySelect1066" 
                         value={currency} 
@@ -1684,7 +1684,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                                                     performanceNode={!isCurrentControl && controlRatesForDisplay ? getPerformanceRelativeToControl(controlRatesForDisplay.averageIpp, variantCalculatedData.averageIpp) : undefined}
                                                   />
                                                   <MetricItem
-                                                    label="CCT"
+                                                    label="CCT (%)"
                                                     value={variantCalculatedData.cct}
                                                     performanceNode={!isCurrentControl && controlRatesForDisplay ? getPerformanceRelativeToControl(controlRatesForDisplay.cct, variantCalculatedData.cct) : undefined}
                                                   />
@@ -1918,12 +1918,20 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                   Analyze Test
                 </button>
               ) : (
-                <button 
-                    onClick={handleSaveTest}
-                    className={buttonClasses}
-                >
-                  Save Test Results
-                </button>
+                <div className="flex items-center gap-3">
+                    <button 
+                        onClick={resetToNewAnalysis}
+                        className={secondaryButtonClasses}
+                    >
+                        Start New Test
+                    </button>
+                    <button 
+                        onClick={handleSaveTest}
+                        className={buttonClasses}
+                    >
+                        Save Test Results
+                    </button>
+                </div>
               )}
             </div>
           </div>
