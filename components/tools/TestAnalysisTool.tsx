@@ -968,7 +968,8 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   }, [testName, testType, channel, primaryEngagementMetric, variantsData, controlVariantId, includeCommercial, conversionMetricName, metricNameSelectionOption, currency, is1066ModeActive, allCalculatedRates, testConclusion]);
 
   const handleLoadTest = useCallback((testToLoad: SavedTest) => {
-      const { testState, testResult } = testToLoad;
+      // Load the configuration from the saved test
+      const { testState } = testToLoad;
       setTestName(testState.testName);
       setTestType(testState.testType);
       setChannel(testState.channel);
@@ -981,12 +982,13 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
       setCurrency(testState.currency);
       setIs1066ModeActive(testState.is1066ModeActive);
 
-      setAllCalculatedRates(testResult.allVariantRates);
-      setTestConclusion(testResult.testConclusion);
-
-      setCurrentStep(totalSteps);
-      setViewMode('tool');
-      setIsReviewDetailsExpanded(true);
+      // Reset results and go to step 1 to allow editing and re-running
+      setAllCalculatedRates([]);
+      setTestConclusion(null);
+      setIsReviewDetailsExpanded(false);
+      
+      setCurrentStep(1); // Go back to the beginning of the flow
+      setViewMode('tool'); // Switch to the tool view
   }, []);
 
   const handleDeleteTest = useCallback((idToDelete: number) => {
@@ -1766,7 +1768,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                                   )}
                               </div>
                               <div className="flex items-center gap-2 flex-shrink-0">
-                                  <button onClick={() => onLoad(test)} className={secondaryButtonClasses.replace('py-2.5', 'py-2')}>View</button>
+                                  <button onClick={() => onLoad(test)} className={secondaryButtonClasses.replace('py-2.5', 'py-2')}>Edit / Re-run</button>
                                   <button onClick={() => onDelete(test.id)} className={`${tertiaryButtonClasses} bg-red-500 text-white hover:bg-red-600`}>Delete</button>
                               </div>
                           </li>
