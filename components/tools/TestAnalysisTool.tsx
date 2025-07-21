@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useMemo, ChangeEvent, useRef, useEffect } from 'react';
 import { ToolProps } from '../../types';
 import { ArrowLeftIcon, XMarkIcon, BeakerIcon } from '../icons'; // Added BeakerIcon for WIP
@@ -16,7 +17,8 @@ interface VariantMetrics {
   // 1066 Mode specific commercial - direct inputs
   srrRateInput: string; 
   mrrRateInput: string; 
-  averageIppInput: string; 
+  averageIppInput: string;
+  cctInput: string;
 }
 
 interface Variant extends VariantMetrics {
@@ -33,6 +35,7 @@ const initialMetrics: Omit<VariantMetrics, 'id' | 'name'> = {
   srrRateInput: '',
   mrrRateInput: '',
   averageIppInput: '',
+  cctInput: '',
 };
 
 const createNewVariant = (idNumeric: number, name?: string): Variant => ({
@@ -45,6 +48,7 @@ type TestType = 'engagement';
 type Channel = 'email' | 'sms';
 type Currency = 'GBP' | 'USD' | 'EUR';
 type MetricNameOption = "SRR" | "MRR" | "IPP" | "custom";
+type PrimaryMetricOption = 'openRate' | 'clickThroughRate' | 'auto';
 
 const currencySymbols: Record<Currency, string> = {
   GBP: '£',
@@ -76,6 +80,7 @@ type RateData = {
   srrRate: string;    // 1066 (from srrRateInput)
   mrrRate: string;    // 1066 (from mrrRateInput)
   averageIpp: string; // 1066 (from averageIppInput)
+  cct: string;        // 1066 (from cctInput)
 
   // Significance results (compared to control) - applicable for engagement & generic commercial
   openRateSig?: SignificanceInfo;
@@ -100,6 +105,28 @@ interface TestConclusionData {
     overallWinnerVariantName: string | null;
     isFlatResult: boolean;
     winningKpiPerformanceChange: number | null; 
+}
+
+interface SavedTest {
+  id: number;
+  savedAt: string;
+  testState: {
+    testName: string;
+    testType: TestType;
+    channel: Channel;
+    primaryEngagementMetric: PrimaryMetricOption;
+    variantsData: Variant[];
+    controlVariantId: string;
+    includeCommercial: boolean;
+    conversionMetricName: string;
+    metricNameSelectionOption: MetricNameOption | 'custom';
+    currency: Currency;
+    is1066ModeActive: boolean;
+  };
+  testResult: {
+    allVariantRates: RateData[];
+    testConclusion: TestConclusionData | null;
+  }
 }
 
 // Standard Normal Cumulative Distribution Function (CDF)
@@ -156,13 +183,168 @@ function calculateRateAndSignificance(
     };
 }
 
+const parseMetricValue = (valueStr: string | undefined): number | null => {
+  if (valueStr === 'N/A' || valueStr === undefined || valueStr.trim() === '' || valueStr.includes('(No Clicks)') || valueStr.includes('(No SRR Base)')) return null;
+  const num = parseFloat(String(valueStr).replace(/[^0-9.,-]+/g,"").replace(',', '.'));
+  return isNaN(num) ? null : num;
+};
+
+const formatNumberForDisplay = (valueStr: string | undefined | number | null) => {
+  if (valueStr === 'N/A' || valueStr === undefined || valueStr === null || String(valueStr).trim() === '') return 'N/A';
+  const num = parseFloat(String(valueStr));
+  return isNaN(num) ? 'N/A' : num.toLocaleString();
+};
+
+const PerformanceSummaryTable: React.FC<{
+  allVariantRates: RateData[];
+  channel: Channel;
+  includeCommercial: boolean;
+  is1066ModeActive: boolean;
+  currency: Currency;
+  conversionMetricName: string;
+  controlVariantId: string;
+  testConclusion: TestConclusionData | null;
+}> = ({
+  allVariantRates,
+  channel,
+  includeCommercial,
+  is1066ModeActive,
+  currency,
+  conversionMetricName,
+  controlVariantId,
+  testConclusion,
+}) => {
+  const getColumnWinnerId = (
+    metricKey: keyof Omit<RateData, 'id' | 'name' | 'sendsRaw' | 'uniqueOpensRaw' | 'uniqueClicksRaw' | 'conversionsRaw' | 'openRateSig' | 'clickThroughRateSig' | 'conversionRateSig'>,
+    higherIsBetter: boolean
+  ): string | null => {
+    let winnerId: string | null = null;
+    let bestValue: number | null = null;
+
+    for (const rate of allVariantRates) {
+      const value = parseMetricValue(rate[metricKey as keyof RateData] as string);
+      if (value === null) continue;
+
+      if (bestValue === null || (higherIsBetter ? value > bestValue : value < bestValue)) {
+        bestValue = value;
+        winnerId = rate.id;
+      }
+    }
+    return winnerId;
+  };
+
+  const columnWinners = {
+    openRate: channel === 'email' ? getColumnWinnerId('openRate', true) : null,
+    clickThroughRate: getColumnWinnerId('clickThroughRate', true),
+    srrRate: includeCommercial && is1066ModeActive ? getColumnWinnerId('srrRate', true) : null,
+    mrrRate: includeCommercial && is1066ModeActive ? getColumnWinnerId('mrrRate', true) : null,
+    averageIpp: includeCommercial && is1066ModeActive ? getColumnWinnerId('averageIpp', true) : null,
+    cct: includeCommercial && is1066ModeActive ? getColumnWinnerId('cct', true) : null,
+    conversionRate: includeCommercial && !is1066ModeActive ? getColumnWinnerId('conversionRate', true) : null,
+    totalRevenue: includeCommercial && !is1066ModeActive ? getColumnWinnerId('totalRevenue', true) : null,
+  };
+
+
+  const headers: React.ReactNode[] = ['Variant', 'Sends'];
+  if (channel === 'email') headers.push(<>Unique Opens <br /><span className="font-normal text-xs">(Open Rate)</span></>);
+  headers.push(<>Unique Clicks <br /><span className="font-normal text-xs">(CTR)</span></>);
+
+  if (includeCommercial) {
+    if (is1066ModeActive) {
+      headers.push('SRR', 'MRR', 'Average IPP', 'CCT');
+    } else {
+      headers.push(<>{conversionMetricName} <br /><span className="font-normal text-xs">(Conv. Rate)</span></>);
+      headers.push(`Total Revenue (${currencySymbols[currency]})`);
+    }
+  }
+
+  return (
+    <div className="my-8">
+      <h4 className="text-lg font-semibold text-crm-text-heading dark:text-crm-dm-text-heading mb-3">
+        Performance Summary Table
+      </h4>
+      <div className="overflow-x-auto rounded-lg border border-crm-border dark:border-crm-dm-border bg-crm-card dark:bg-crm-dm-card shadow-lg">
+        <table className="w-full text-sm text-left text-crm-text-body dark:text-crm-dm-text-body">
+          <thead className="text-xs text-crm-text-heading dark:text-crm-dm-text-heading uppercase bg-crm-card-footer-bg dark:bg-crm-dm-card-footer-bg">
+            <tr>
+              {headers.map((header, index) => (
+                <th key={index} scope="col" className="px-4 py-3 whitespace-nowrap">
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {allVariantRates.map((rate, rowIndex) => {
+              const isControl = rate.id === controlVariantId;
+              const isOverallWinner = testConclusion?.overallWinnerVariantName === rate.name && !testConclusion.isFlatResult;
+              const isFlatWinner = testConclusion?.overallWinnerVariantName === rate.name && testConclusion.isFlatResult;
+
+              const rowClass = isControl
+                ? 'bg-fuchsia-50 dark:bg-fuchsia-900/20'
+                : (rowIndex % 2 === 0 ? 'bg-crm-card dark:bg-crm-dm-card' : 'bg-crm-background dark:bg-crm-dm-background/50');
+
+              const winnerClass = isOverallWinner ? 'ring-2 ring-green-500' : isFlatWinner ? 'ring-2 ring-amber-500' : '';
+              
+              const renderCell = (value: React.ReactNode, isWinner: boolean) => (
+                <td className={`px-4 py-3 ${isWinner ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                  {value}
+                </td>
+              );
+
+              return (
+                <tr key={rate.id} className={`${rowClass} border-b last:border-b-0 border-crm-border dark:border-crm-dm-border ${winnerClass}`}>
+                  <td className="px-4 py-3 font-semibold text-crm-text-heading dark:text-crm-dm-text-heading whitespace-nowrap">
+                    {rate.name}
+                    {isControl && <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">(C)</span>}
+                  </td>
+                  {renderCell(formatNumberForDisplay(rate.sendsRaw), false)}
+                  {channel === 'email' && renderCell(
+                    <>{formatNumberForDisplay(rate.uniqueOpensRaw)} <br/><span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">({rate.openRate})</span></>,
+                    rate.id === columnWinners.openRate
+                  )}
+                  {renderCell(
+                    <>{formatNumberForDisplay(rate.uniqueClicksRaw)} <br/><span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">({rate.clickThroughRate})</span></>,
+                    rate.id === columnWinners.clickThroughRate
+                  )}
+                  {includeCommercial && (
+                    is1066ModeActive ? (
+                      <>
+                        {renderCell(rate.srrRate, rate.id === columnWinners.srrRate)}
+                        {renderCell(rate.mrrRate, rate.id === columnWinners.mrrRate)}
+                        {renderCell(rate.averageIpp, rate.id === columnWinners.averageIpp)}
+                        {renderCell(rate.cct, rate.id === columnWinners.cct)}
+                      </>
+                    ) : (
+                      <>
+                        {renderCell(
+                          <>{formatNumberForDisplay(rate.conversionsRaw)} <br/><span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">({rate.conversionRate})</span></>,
+                          rate.id === columnWinners.conversionRate
+                        )}
+                        {renderCell(rate.totalRevenue, rate.id === columnWinners.totalRevenue)}
+                      </>
+                    )
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+       <p className="mt-2 text-xs text-crm-text-muted dark:text-crm-dm-text-muted">
+         <span className="font-bold text-green-600 dark:text-green-400">Bold</span> indicates the winning variant for that metric column. A <span className="p-0.5 rounded ring-2 ring-green-500">green outline</span> indicates the overall test winner. (C) denotes the control variant.
+       </p>
+    </div>
+  );
+};
+
 
 const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [testName, setTestName] = useState<string>('');
   const [testType, setTestType] = useState<TestType>('engagement');
   const [channel, setChannel] = useState<Channel>('email');
-  const [primaryEngagementMetric, setPrimaryEngagementMetric] = useState<'openRate' | 'clickThroughRate'>('clickThroughRate');
+  const [primaryEngagementMetric, setPrimaryEngagementMetric] = useState<PrimaryMetricOption>('auto');
   
   const [variantsData, setVariantsData] = useState<Variant[]>([
     createNewVariant(0, 'Variant A'),
@@ -187,7 +369,28 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisProgressText, setAnalysisProgressText] = useState<string>('');
 
+  const [savedTests, setSavedTests] = useState<SavedTest[]>([]);
+  const [viewMode, setViewMode] = useState<'tool' | 'savedList'>('tool');
+  const [allCalculatedRates, setAllCalculatedRates] = useState<RateData[]>([]);
+
   const totalSteps = 4;
+
+  useEffect(() => {
+    try {
+        const storedTests = localStorage.getItem('crmHub_savedTests');
+        if (storedTests) {
+            setSavedTests(JSON.parse(storedTests));
+        }
+    } catch (error) {
+        console.error("Failed to load saved tests:", error);
+        setSavedTests([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('crmHub_savedTests', JSON.stringify(savedTests));
+  }, [savedTests]);
+
 
   useEffect(() => {
     localStorage.setItem('is1066ModeActive', String(is1066ModeActive));
@@ -257,7 +460,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
         const conversionsRaw = parseInputAsNumber(variantData.conversions); // Generic
 
         let openRate = 'N/A', clickThroughRate = 'N/A', conversionRate = 'N/A';
-        let totalRevenue = 'N/A', srrRate = 'N/A', mrrRate = 'N/A', averageIpp = 'N/A';
+        let totalRevenue = 'N/A', srrRate = 'N/A', mrrRate = 'N/A', averageIpp = 'N/A', cct = 'N/A';
         
         let openRateSig: SignificanceInfo = { pValue: null, isSignificant: false };
         let clickThroughRateSig: SignificanceInfo = { pValue: null, isSignificant: false };
@@ -294,6 +497,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                 srrRate = formatPercentageInput(variantData.srrRateInput);
                 mrrRate = formatPercentageInput(variantData.mrrRateInput);
                 averageIpp = formatAsCurrency(variantData.averageIppInput, selectedCurrency);
+                cct = formatAsCurrency(variantData.cctInput, selectedCurrency);
                 // No significance testing for 1066 direct inputs
             } else { // Generic commercial
                 if (uniqueClicksRaw !== null && uniqueClicksRaw > 0 && conversionsRaw !== null) {
@@ -312,12 +516,12 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
         }
     return {
         sendsRaw, uniqueOpensRaw, uniqueClicksRaw, conversionsRaw,
-        openRate, clickThroughRate, conversionRate, totalRevenue, srrRate, mrrRate, averageIpp,
+        openRate, clickThroughRate, conversionRate, totalRevenue, srrRate, mrrRate, averageIpp, cct,
         openRateSig, clickThroughRateSig, conversionRateSig
     };
   }, []);
 
-  const allVariantRates: RateData[] = useMemo(() => {
+  const allVariantRates = useMemo(() => {
     const controlVData = variantsData.find(v => v.id === controlVariantId);
     return variantsData.map(variant => ({
       id: variant.id,
@@ -325,14 +529,13 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
       ...getVariantCalculatedRates(variant, controlVData, channel, currency, is1066ModeActive, includeCommercial),
     }));
   }, [variantsData, controlVariantId, channel, currency, getVariantCalculatedRates, is1066ModeActive, includeCommercial]);
+  
+  useEffect(() => {
+    setAllCalculatedRates(allVariantRates);
+  }, [allVariantRates]);
 
-  const parseMetricValue = (valueStr: string | undefined): number | null => {
-    if (valueStr === 'N/A' || valueStr === undefined || valueStr.trim() === '' || valueStr.includes('(No Clicks)') || valueStr.includes('(No SRR Base)')) return null;
-    const num = parseFloat(String(valueStr).replace(/[^0-9.,-]+/g,"").replace(',', '.'));
-    return isNaN(num) ? null : num;
-  };
 
-  const determineKpiWinner = (
+  const determineKpiWinner = useCallback((
     rates: RateData[],
     ctrlId: string,
     kpiField: keyof Omit<RateData, 'id' | 'name' | 'sendsRaw' | 'uniqueOpensRaw' | 'uniqueClicksRaw' | 'conversionsRaw' | 'openRateSig' | 'clickThroughRateSig' | 'conversionRateSig'>,
@@ -385,9 +588,9 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
       kpiDisplayName,
       significance: significanceData
     };
-  };
+  }, []);
 
-  const generateTestConclusion = useCallback((): TestConclusionData => {
+  const generateTestConclusion = useCallback((ratesForConclusion: RateData[]): TestConclusionData => {
     const summaryElements: React.ReactNode[] = [];
     let commercialWinnerInfo: KpiWinnerInfo | null = null;
     let engagementWinnerInfo: KpiWinnerInfo | null = null;
@@ -409,13 +612,17 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
 
 
     if (includeCommercial && is1066ModeActive) {
-        const ippKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'averageIpp', `Average IPP (${currencySymbols[currency]})`, true); 
-        const srrKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'srrRate', 'SRR (%)', true);
-        const mrrKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'mrrRate', 'MRR (%)', true);
+        const ippKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'averageIpp', `Average IPP (${currencySymbols[currency]})`, true); 
+        const cctKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'cct', `CCT (${currencySymbols[currency]})`, true);
+        const srrKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'srrRate', 'SRR (%)', true);
+        const mrrKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'mrrRate', 'MRR (%)', true);
 
         if (ippKpiInfo.isConclusive && parseMetricValue(ippKpiInfo.winnerKpiValue) !== null) {
             commercialWinnerInfo = ippKpiInfo; 
             winningKpiForHighlight = ippKpiInfo;
+        } else if (cctKpiInfo.isConclusive && parseMetricValue(cctKpiInfo.winnerKpiValue) !== null) {
+            commercialWinnerInfo = cctKpiInfo;
+            if (!winningKpiForHighlight) winningKpiForHighlight = cctKpiInfo;
         } else if (srrKpiInfo.isConclusive && parseMetricValue(srrKpiInfo.winnerKpiValue) !== null) {
             commercialWinnerInfo = srrKpiInfo;
             if (!winningKpiForHighlight) winningKpiForHighlight = srrKpiInfo;
@@ -429,6 +636,10 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
              summaryElements.push(<p key="ipp-sum">Avg. IPP: <strong>{ippKpiInfo.winnerVariantName}</strong> at {ippKpiInfo.winnerKpiValue}.</p>);
         } else summaryElements.push(<p key="ipp-sum-inconclusive">Avg. IPP analysis inconclusive.</p>);
         
+        if (cctKpiInfo.isConclusive) {
+            summaryElements.push(<p key="cct-sum">CCT: <strong>{cctKpiInfo.winnerVariantName}</strong> at {cctKpiInfo.winnerKpiValue}.</p>);
+        } else summaryElements.push(<p key="cct-sum-inconclusive">CCT analysis inconclusive.</p>);
+
         if (srrKpiInfo.isConclusive) {
             summaryElements.push(<p key="srr-sum">SRR (%): <strong>{srrKpiInfo.winnerVariantName}</strong> at {srrKpiInfo.winnerKpiValue}.</p>);
         } else summaryElements.push(<p key="srr-sum-inconclusive">SRR (%) analysis inconclusive.</p>);
@@ -437,18 +648,18 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
             summaryElements.push(<p key="mrr-sum">MRR (%): <strong>{mrrKpiInfo.winnerVariantName}</strong> at {mrrKpiInfo.winnerKpiValue}.</p>);
         } else summaryElements.push(<p key="mrr-sum-inconclusive">MRR (%) analysis inconclusive.</p>);
         
-        if (!commercialWinnerInfo && !ippKpiInfo.isConclusive && !srrKpiInfo.isConclusive && !mrrKpiInfo.isConclusive ) {
+        if (!commercialWinnerInfo && !ippKpiInfo.isConclusive && !cctKpiInfo.isConclusive && !srrKpiInfo.isConclusive && !mrrKpiInfo.isConclusive ) {
             summaryElements.push(<p key="1066-comm-inconclusive">Overall 1066 commercial analysis inconclusive due to missing data for all key metrics.</p>);
         }
 
     } else if (includeCommercial) { 
-      const revenueKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'totalRevenue', `Total Revenue (${currencySymbols[currency]})`, true);
+      const revenueKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'totalRevenue', `Total Revenue (${currencySymbols[currency]})`, true);
       if (revenueKpiInfo.isConclusive && parseMetricValue(revenueKpiInfo.winnerKpiValue) !== null) {
         commercialWinnerInfo = revenueKpiInfo;
         winningKpiForHighlight = revenueKpiInfo;
       } else {
         const conversionRateKpiName = `${conversionMetricName || 'Conversions'} Rate`; // Suffix removed for cleaner display name
-        const crKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'conversionRate', conversionRateKpiName, true, 'conversionRateSig');
+        const crKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'conversionRate', conversionRateKpiName, true, 'conversionRateSig');
         if (crKpiInfo.isConclusive && parseMetricValue(crKpiInfo.winnerKpiValue) !== null) {
           commercialWinnerInfo = crKpiInfo;
           if (!winningKpiForHighlight) winningKpiForHighlight = crKpiInfo;
@@ -481,24 +692,43 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
       }
     }
 
-    const ctrKpiInfo = determineKpiWinner(allVariantRates, controlVariantId, 'clickThroughRate', 'Click-Through Rate (CTR)', true, 'clickThroughRateSig');
-    const orKpiInfo = channel === 'email' ? determineKpiWinner(allVariantRates, controlVariantId, 'openRate', 'Open Rate (OR)', true, 'openRateSig') : null;
+    const ctrKpiInfo = determineKpiWinner(ratesForConclusion, controlVariantId, 'clickThroughRate', 'Click-Through Rate (CTR)', true, 'clickThroughRateSig');
+    const orKpiInfo = channel === 'email' ? determineKpiWinner(ratesForConclusion, controlVariantId, 'openRate', 'Open Rate (OR)', true, 'openRateSig') : null;
 
     const isCtrConclusive = ctrKpiInfo.isConclusive && parseMetricValue(ctrKpiInfo.winnerKpiValue) !== null;
     const isOrConclusive = orKpiInfo && orKpiInfo.isConclusive && parseMetricValue(orKpiInfo.winnerKpiValue) !== null;
 
-    if (primaryEngagementMetric === 'openRate' && channel === 'email') {
-        if (isOrConclusive) {
-            engagementWinnerInfo = orKpiInfo;
-        } else if (isCtrConclusive) {
-            engagementWinnerInfo = ctrKpiInfo;
-        }
-    } else { // Default to CTR priority
+    if (primaryEngagementMetric === 'auto' && channel === 'email') {
+      const orSig = isOrConclusive && (orKpiInfo?.significance?.isSignificant ?? false);
+      const ctrSig = isCtrConclusive && (ctrKpiInfo?.significance?.isSignificant ?? false);
+
+      if (ctrSig && !orSig) { // CTR is significant, OR is not. CTR wins.
+        engagementWinnerInfo = ctrKpiInfo;
+      } else if (orSig && !ctrSig) { // OR is significant, CTR is not. OR wins.
+        engagementWinnerInfo = orKpiInfo;
+      } else if (orSig && ctrSig) { // Both are significant. Compare uplift.
+        const orUplift = Math.abs(orKpiInfo?.performanceChangePercent ?? 0);
+        const ctrUplift = Math.abs(ctrKpiInfo?.performanceChangePercent ?? 0);
+        engagementWinnerInfo = ctrUplift >= orUplift ? ctrKpiInfo : orKpiInfo;
+      } else { // Fallback cases: neither significant, or one/both inconclusive. Prioritize CTR.
         if (isCtrConclusive) {
-            engagementWinnerInfo = ctrKpiInfo;
+          engagementWinnerInfo = ctrKpiInfo;
         } else if (isOrConclusive) {
-            engagementWinnerInfo = orKpiInfo;
+          engagementWinnerInfo = orKpiInfo;
         }
+      }
+    } else if (primaryEngagementMetric === 'openRate' && channel === 'email') {
+      if (isOrConclusive) {
+        engagementWinnerInfo = orKpiInfo;
+      } else if (isCtrConclusive) {
+        engagementWinnerInfo = ctrKpiInfo; // fallback if OR is not conclusive
+      }
+    } else { // Default to CTR priority (covers 'clickThroughRate' selection, SMS channel)
+      if (isCtrConclusive) {
+        engagementWinnerInfo = ctrKpiInfo;
+      } else if (isOrConclusive) {
+        engagementWinnerInfo = orKpiInfo;
+      }
     }
     
     if (engagementWinnerInfo && !winningKpiForHighlight) {
@@ -511,10 +741,19 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
         (primaryEngagementMetric === 'clickThroughRate' && engagementWinnerInfo.kpiDisplayName.includes('Click-Through Rate')) ||
         channel === 'sms';
 
+      let finalMetricDescription: string;
+      if (primaryEngagementMetric === 'auto') {
+          finalMetricDescription = `the most impactful metric, ${engagementWinnerInfo.kpiDisplayName}`;
+      } else if (wasPrimaryMetricUsed) {
+          finalMetricDescription = `the primary metric, ${engagementWinnerInfo.kpiDisplayName}`;
+      } else {
+          finalMetricDescription = `the fallback metric, ${engagementWinnerInfo.kpiDisplayName}`;
+      }
+
       summaryElements.push(
         <p key="eng-winner">
-          For engagement, based on the 
-          <strong> {wasPrimaryMetricUsed ? 'primary metric ' : 'fallback metric '}{engagementWinnerInfo.kpiDisplayName}</strong>,
+          For engagement, based on 
+          <strong> {finalMetricDescription}</strong>,
           <strong> {engagementWinnerInfo.winnerVariantName}</strong> led with <strong>{engagementWinnerInfo.winnerKpiValue}</strong>.
           {engagementWinnerInfo.performanceChangePercent !== null && engagementWinnerInfo.winnerVariantName !== controlName && (
             <>
@@ -546,7 +785,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
 
       if (overallWinnerVariantName === controlName) {
          // Check if any challenger significantly outperformed the control on this KPI
-        const challengerWonSignificantly = allVariantRates.filter(v => v.id !== controlVariantId).some(challengerRate => {
+        const challengerWonSignificantly = ratesForConclusion.filter(v => v.id !== controlVariantId).some(challengerRate => {
             if (!winningKpiForHighlight) return false;
             // Determine which significance info to use based on the KPI
             let sigInfo: SignificanceInfo | undefined;
@@ -608,7 +847,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
 
 
     return { summaryText: <div className="space-y-2 text-sm">{summaryElements}</div>, overallWinnerVariantName, isFlatResult, winningKpiPerformanceChange };
-  }, [allVariantRates, controlVariantId, channel, includeCommercial, conversionMetricName, currency, variantsData, is1066ModeActive, primaryEngagementMetric]);
+  }, [determineKpiWinner, variantsData, controlVariantId, channel, includeCommercial, conversionMetricName, currency, is1066ModeActive, primaryEngagementMetric]);
 
 
   const handleNextStep = useCallback(() => {
@@ -646,7 +885,9 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
       const totalDelay = analysisSteps[analysisSteps.length - 1].delay + 1000;
 
       setTimeout(() => {
-        setTestConclusion(generateTestConclusion());
+        const calculatedRates = allVariantRates;
+        setAllCalculatedRates(calculatedRates);
+        setTestConclusion(generateTestConclusion(calculatedRates));
         setIsAnalyzing(false);
         setCurrentStep(totalSteps);
       }, totalDelay);
@@ -654,7 +895,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
     } else {
       setCurrentStep((prev) => Math.min(prev + 1, totalSteps));
     }
-  }, [currentStep, generateTestConclusion, includeCommercial, channel, variantsData.length, is1066ModeActive]);
+  }, [currentStep, generateTestConclusion, includeCommercial, channel, variantsData.length, is1066ModeActive, allVariantRates]);
 
 
   const handlePrevStep = useCallback(() => {
@@ -688,6 +929,72 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
   const setAsControl = useCallback((id: string) => {
     setControlVariantId(id);
   }, []);
+
+  const resetToNewAnalysis = useCallback(() => {
+      setViewMode('tool');
+      setCurrentStep(1); 
+      setTestName('');
+      const newVariants = [createNewVariant(0, 'Variant A'), createNewVariant(1, 'Variant B')];
+      setVariantsData(newVariants.map(v => ({...v, ...initialMetrics}))); 
+      setControlVariantId(newVariants[0].id);
+      setNextVariantNumericId(2);
+      setIncludeCommercial(false);
+      setChannel('email');
+      setPrimaryEngagementMetric('auto');
+      setConversionMetricName('Purchases'); 
+      setMetricNameSelectionOption('custom'); 
+      setCurrency('GBP'); 
+      setIsReviewDetailsExpanded(false); 
+      setTestConclusion(null); 
+      setAllCalculatedRates([]);
+  }, []);
+
+  const handleSaveTest = useCallback(() => {
+      const newSavedTest: SavedTest = {
+          id: Date.now(),
+          savedAt: new Date().toISOString(),
+          testState: {
+              testName, testType, channel, primaryEngagementMetric,
+              variantsData, controlVariantId, includeCommercial,
+              conversionMetricName, metricNameSelectionOption, currency, is1066ModeActive,
+          },
+          testResult: {
+              allVariantRates: allCalculatedRates,
+              testConclusion: testConclusion,
+          }
+      };
+      setSavedTests(prev => [...prev, newSavedTest]);
+      alert("Test results saved!");
+  }, [testName, testType, channel, primaryEngagementMetric, variantsData, controlVariantId, includeCommercial, conversionMetricName, metricNameSelectionOption, currency, is1066ModeActive, allCalculatedRates, testConclusion]);
+
+  const handleLoadTest = useCallback((testToLoad: SavedTest) => {
+      const { testState, testResult } = testToLoad;
+      setTestName(testState.testName);
+      setTestType(testState.testType);
+      setChannel(testState.channel);
+      setPrimaryEngagementMetric(testState.primaryEngagementMetric);
+      setVariantsData(testState.variantsData);
+      setControlVariantId(testState.controlVariantId);
+      setIncludeCommercial(testState.includeCommercial);
+      setConversionMetricName(testState.conversionMetricName);
+      setMetricNameSelectionOption(testState.metricNameSelectionOption);
+      setCurrency(testState.currency);
+      setIs1066ModeActive(testState.is1066ModeActive);
+
+      setAllCalculatedRates(testResult.allVariantRates);
+      setTestConclusion(testResult.testConclusion);
+
+      setCurrentStep(totalSteps);
+      setViewMode('tool');
+      setIsReviewDetailsExpanded(true);
+  }, []);
+
+  const handleDeleteTest = useCallback((idToDelete: number) => {
+    if (window.confirm("Are you sure you want to delete this saved test?")) {
+        setSavedTests(prev => prev.filter(t => t.id !== idToDelete));
+    }
+  }, []);
+
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -726,6 +1033,8 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
     setChannel(newChannel);
     if (newChannel === 'sms') {
       setPrimaryEngagementMetric('clickThroughRate');
+    } else {
+      setPrimaryEngagementMetric('auto');
     }
 
     const newIncludeCommercial = Math.random() < 0.7; 
@@ -761,7 +1070,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
             uniqueClicks = Math.min(sends, uniqueClicks);
         }
 
-        let baseReturn: Partial<Pick<VariantMetrics, 'conversions' | 'averageValuePerConversion' | 'srrRateInput' | 'mrrRateInput' | 'averageIppInput'>> = {};
+        let baseReturn: Partial<Pick<VariantMetrics, 'conversions' | 'averageValuePerConversion' | 'srrRateInput' | 'mrrRateInput' | 'averageIppInput' | 'cctInput'>> = {};
 
         if (newIncludeCommercial) {
             if (is1066ModeActive) {
@@ -769,6 +1078,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                     srrRateInput: generateRandomNumber(50, 90, true).toFixed(1),
                     mrrRateInput: generateRandomNumber(40, 85, true).toFixed(1),
                     averageIppInput: generateRandomNumber(5, 50, true).toFixed(2),
+                    cctInput: generateRandomNumber(10, 30, true).toFixed(2),
                 };
             } else {
                  let conversions = 0;
@@ -798,6 +1108,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
 
   const handleFillWithFlatData = useCallback(() => {
     setChannel('email');
+    setPrimaryEngagementMetric('auto');
     setIncludeCommercial(true);
     setCurrency('GBP');
 
@@ -827,13 +1138,14 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
 
     const controlSrrRate = 75.0;
     const controlMrrRate = 80.0; 
-    const controlAverageIpp = 20.00; 
+    const controlAverageIpp = 20.00;
+    const controlCct = 15.00; 
 
     const controlGenericConversionRateOfClicks = 0.05; 
     const controlGenericAOV = 20;
 
     const updatedVariantsData = currentVariants.map((variant, index) => {
-        let challengerData: Partial<Pick<VariantMetrics, 'conversions' | 'averageValuePerConversion' | 'srrRateInput' | 'mrrRateInput' | 'averageIppInput'>> = {};
+        let challengerData: Partial<Pick<VariantMetrics, 'conversions' | 'averageValuePerConversion' | 'srrRateInput' | 'mrrRateInput' | 'averageIppInput' | 'cctInput'>> = {};
         
         const sendsVariation = index === 0 ? 0 : generateRandomNumber(-2000, 2000); 
         const challengerSends = controlSends + sendsVariation;
@@ -846,6 +1158,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                 srrRateInput: (controlSrrRate + generateRandomNumber(-1, 1, true)).toFixed(1),
                 mrrRateInput: (controlMrrRate + generateRandomNumber(-1, 1, true)).toFixed(1),
                 averageIppInput: (controlAverageIpp + generateRandomNumber(-0.5, 0.5, true)).toFixed(2),
+                cctInput: (controlCct + generateRandomNumber(-0.75, 0.75, true)).toFixed(2),
             };
         } else {
             const challengerGenericConversions = Math.round(challengerClicks * controlGenericConversionRateOfClicks + generateRandomNumber(-30, 30));
@@ -980,6 +1293,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
               <div><label htmlFor={`srrRateInput-${variant.id}`} className={labelClasses}>SRR (%)</label><input type="number" id={`srrRateInput-${variant.id}`} value={variant.srrRateInput} onChange={e => updateVariantMetric(variant.id, 'srrRateInput', e.target.value)} className={inputClasses} placeholder="e.g., 75" min="0" step="0.01"/></div>
               <div><label htmlFor={`mrrRateInput-${variant.id}`} className={labelClasses}>MRR (%)</label><input type="number" id={`mrrRateInput-${variant.id}`} value={variant.mrrRateInput} onChange={e => updateVariantMetric(variant.id, 'mrrRateInput', e.target.value)} className={inputClasses} placeholder="e.g., 60" min="0" step="0.01"/></div>
               <div><label htmlFor={`averageIppInput-${variant.id}`} className={labelClasses}>Average IPP ({currencySymbols[currency]})</label><input type="number" id={`averageIppInput-${variant.id}`} value={variant.averageIppInput} onChange={e => updateVariantMetric(variant.id, 'averageIppInput', e.target.value)} className={inputClasses} placeholder="e.g., 25.50" min="0" step="0.01"/></div>
+              <div><label htmlFor={`cctInput-${variant.id}`} className={labelClasses}>CCT ({currencySymbols[currency]})</label><input type="number" id={`cctInput-${variant.id}`} value={variant.cctInput} onChange={e => updateVariantMetric(variant.id, 'cctInput', e.target.value)} className={inputClasses} placeholder="e.g., 15.25" min="0" step="0.01"/></div>
             </>
           ) : ( // Generic Commercial Metrics
             <>
@@ -992,12 +1306,6 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
         )}
       </div>
     );
-  };
-
-  const formatNumberForDisplay = (valueStr: string | undefined | number | null) => {
-    if (valueStr === 'N/A' || valueStr === undefined || valueStr === null || String(valueStr).trim() === '') return 'N/A';
-    const num = parseFloat(String(valueStr));
-    return isNaN(num) ? 'N/A' : num.toLocaleString();
   };
 
   const formatCurrencyForDisplay = (valueStr: string | undefined, selectedCurrency: Currency) => {
@@ -1061,6 +1369,8 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                   setChannel(newChannel);
                   if (newChannel === 'sms') {
                     setPrimaryEngagementMetric('clickThroughRate');
+                  } else {
+                    setPrimaryEngagementMetric('auto');
                   }
                 }} 
                 className={inputClasses}
@@ -1073,7 +1383,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
               <div>
                 <label className={labelClasses}>Primary Engagement Metric</label>
                 <p className="mt-1 text-xs text-crm-text-muted dark:text-crm-dm-text-muted">Select the main KPI for engagement success.</p>
-                <div className="mt-2 flex flex-col sm:flex-row gap-2 sm:gap-4">
+                <div className="mt-2 flex flex-col sm:flex-row flex-wrap gap-x-4 gap-y-2">
                   <label className="flex items-center cursor-pointer">
                     <input
                       type="radio"
@@ -1096,6 +1406,19 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                     />
                     <span className={checkboxLabelClasses}>Open Rate (OR)</span>
                   </label>
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="primaryEngagementMetric"
+                      value="auto"
+                      checked={primaryEngagementMetric === 'auto'}
+                      onChange={() => setPrimaryEngagementMetric('auto')}
+                      className="h-4 w-4 text-crm-accent focus:ring-crm-accent border-crm-border dark:border-crm-dm-border bg-white dark:bg-slate-700"
+                    />
+                    <span className={checkboxLabelClasses}>
+                      Let App Decide
+                    </span>
+                  </label>
                 </div>
               </div>
             )}
@@ -1106,7 +1429,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {variantsData.map(variant => {
-                const rates = allVariantRates.find(r => r.id === variant.id);
+                const rates = allCalculatedRates.find(r => r.id === variant.id);
                 return renderVariantInputs(variant, rates, 2);
               })}
             </div>
@@ -1186,7 +1509,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
             )}
             {includeCommercial && is1066ModeActive && ( 
                  <div>
-                    <label htmlFor="currencySelect1066" className={labelClasses}>Currency (for IPP)</label>
+                    <label htmlFor="currencySelect1066" className={labelClasses}>Currency (for IPP & CCT)</label>
                     <select 
                         id="currencySelect1066" 
                         value={currency} 
@@ -1203,7 +1526,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
             {includeCommercial && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {variantsData.map(variant => {
-                    const rates = allVariantRates.find(r => r.id === variant.id);
+                    const rates = allCalculatedRates.find(r => r.id === variant.id);
                     return renderVariantInputs(variant, rates, 3);
                   })}
                 </div>
@@ -1216,7 +1539,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
           </div>
         );
       case 4: 
-        const controlRatesForDisplay = allVariantRates.find(r => r.id === controlVariantId); 
+        const controlRatesForDisplay = allCalculatedRates.find(r => r.id === controlVariantId); 
         
         const MetricItem: React.FC<{ label: string; value?: string; performanceNode?: React.ReactNode; significanceNode?: React.ReactNode }> = 
             ({ label, value, performanceNode, significanceNode }) => (
@@ -1242,6 +1565,17 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                 {testConclusion?.summaryText || <p>Generating conclusion...</p>}
             </div>
 
+            <PerformanceSummaryTable
+                allVariantRates={allCalculatedRates}
+                channel={channel}
+                includeCommercial={includeCommercial}
+                is1066ModeActive={is1066ModeActive}
+                currency={currency}
+                conversionMetricName={conversionMetricName}
+                controlVariantId={controlVariantId}
+                testConclusion={testConclusion}
+            />
+
             <div>
                 <button
                     onClick={() => setIsReviewDetailsExpanded(prev => !prev)}
@@ -1261,7 +1595,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                         </h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                             {variantsData.map(variant => {
-                                const variantCalculatedData = allVariantRates.find(vrd => vrd.id === variant.id);
+                                const variantCalculatedData = allCalculatedRates.find(vrd => vrd.id === variant.id);
                                 const isCurrentControl = variant.id === controlVariantId;
                                 const isOverallWinner = testConclusion?.overallWinnerVariantName === variant.name;
 
@@ -1332,25 +1666,27 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                                               is1066ModeActive ? (
                                                 <>
                                                   <p className="text-xs font-semibold uppercase text-crm-text-muted dark:text-crm-dm-text-muted tracking-wider mb-1 pt-3 mt-2 border-t border-crm-border dark:border-crm-dm-border">
-                                                    1066 Metrics ({currencySymbols[currency]})
+                                                    Metrics
                                                   </p>
                                                   <MetricItem 
                                                     label="SRR (%)" 
                                                     value={variantCalculatedData.srrRate} 
                                                     performanceNode={!isCurrentControl && controlRatesForDisplay ? getPerformanceRelativeToControl(controlRatesForDisplay.srrRate, variantCalculatedData.srrRate) : undefined}
-                                                    // No significance for 1066 direct inputs
                                                   />
                                                   <MetricItem 
                                                     label="MRR (%)" 
                                                     value={variantCalculatedData.mrrRate} 
                                                     performanceNode={!isCurrentControl && controlRatesForDisplay ? getPerformanceRelativeToControl(controlRatesForDisplay.mrrRate, variantCalculatedData.mrrRate) : undefined}
-                                                    // No significance for 1066 direct inputs
                                                   />
                                                   <MetricItem 
                                                     label="Average IPP" 
                                                     value={variantCalculatedData.averageIpp}
                                                     performanceNode={!isCurrentControl && controlRatesForDisplay ? getPerformanceRelativeToControl(controlRatesForDisplay.averageIpp, variantCalculatedData.averageIpp) : undefined}
-                                                    // No significance for 1066 direct inputs
+                                                  />
+                                                  <MetricItem
+                                                    label="CCT"
+                                                    value={variantCalculatedData.cct}
+                                                    performanceNode={!isCurrentControl && controlRatesForDisplay ? getPerformanceRelativeToControl(controlRatesForDisplay.cct, variantCalculatedData.cct) : undefined}
                                                   />
                                                 </>
                                               ) : ( // Generic commercial
@@ -1397,7 +1733,82 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
     }
   };
 
+  const SavedTestsList: React.FC<{
+      tests: SavedTest[],
+      onLoad: (test: SavedTest) => void,
+      onDelete: (id: number) => void
+  }> = ({ tests, onLoad, onDelete }) => (
+      <div className={cardClasses}>
+          <h3 className="text-xl font-semibold text-crm-text-heading dark:text-crm-dm-text-heading mb-4">Saved Test Analyses</h3>
+          {tests.length === 0 ? (
+              <p className="text-crm-text-muted dark:text-crm-dm-text-muted">No tests have been saved yet.</p>
+          ) : (
+              <ul className="space-y-3">
+                  {tests.sort((a,b) => b.id - a.id).map(test => {
+                      const winnerName = test.testResult.testConclusion?.overallWinnerVariantName;
+                      const isFlat = test.testResult.testConclusion?.isFlatResult;
+                      const perfChange = test.testResult.testConclusion?.winningKpiPerformanceChange;
+
+                      return (
+                          <li key={test.id} className="p-4 border border-crm-border dark:border-crm-dm-border rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-crm-background dark:bg-crm-dm-background">
+                              <div className="flex-grow">
+                                  <p className="font-semibold text-crm-text-body dark:text-crm-dm-text-body">{test.testState.testName || 'Untitled Test'}</p>
+                                  <p className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">
+                                      Saved on {new Date(test.savedAt).toLocaleDateString()}
+                                  </p>
+                                  {winnerName && (
+                                    <p className={`text-sm mt-1 font-semibold ${isFlat ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+                                      {isFlat ? 'Flat Result:' : 'Winner:'} {winnerName}
+                                      {perfChange !== null && !isFlat && (
+                                        <span className="font-normal"> ({perfChange > 0 ? '+' : ''}{perfChange.toFixed(1)}%)</span>
+                                      )}
+                                    </p>
+                                  )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                  <button onClick={() => onLoad(test)} className={secondaryButtonClasses.replace('py-2.5', 'py-2')}>View</button>
+                                  <button onClick={() => onDelete(test.id)} className={`${tertiaryButtonClasses} bg-red-500 text-white hover:bg-red-600`}>Delete</button>
+                              </div>
+                          </li>
+                      );
+                  })}
+              </ul>
+          )}
+      </div>
+  );
+
   const stepTitles = ["Test Setup", "Variant Metrics", "Commercial Impact", "Review & Analyze"];
+  const ViewSwitcher: React.FC<{
+    currentView: 'tool' | 'savedList',
+    onSwitch: (view: 'tool' | 'savedList') => void,
+    savedCount: number
+  }> = ({ currentView, onSwitch, savedCount }) => (
+    <div className="flex items-center gap-2 bg-crm-card-footer-bg dark:bg-crm-dm-card-footer-bg p-1 rounded-lg mb-6">
+       <button
+          onClick={() => {
+              if (currentView !== 'tool' || currentStep > 1) { // If coming from saved list or want to restart
+                resetToNewAnalysis();
+              }
+              onSwitch('tool');
+          }}
+          className={`flex-1 text-sm font-semibold py-2 px-4 rounded-md transition-colors duration-200 ${currentView === 'tool' ? 'bg-crm-card dark:bg-crm-dm-card shadow text-crm-accent' : 'text-crm-text-muted dark:text-crm-dm-text-muted hover:bg-crm-background dark:hover:bg-crm-dm-background'}`}
+        >
+          New Analysis
+        </button>
+        <button
+          onClick={() => onSwitch('savedList')}
+          className={`flex-1 text-sm font-semibold py-2 px-4 rounded-md transition-colors duration-200 relative ${currentView === 'savedList' ? 'bg-crm-card dark:bg-crm-dm-card shadow text-crm-accent' : 'text-crm-text-muted dark:text-crm-dm-text-muted hover:bg-crm-background dark:hover:bg-crm-dm-background'}`}
+        >
+          Saved Tests
+          {savedCount > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-crm-accent text-white text-xs font-bold">
+                  {savedCount}
+              </span>
+          )}
+        </button>
+    </div>
+  );
+
 
   return (
     <div className="space-y-8">
@@ -1468,59 +1879,55 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
         </div>
       )}
 
-      <div className={`${cardClasses}`}>
-        <div className="mb-6">
-          <p className="text-sm font-medium text-crm-text-muted dark:text-crm-dm-text-muted">
-            Step {currentStep} of {totalSteps}: <span className="text-crm-text-body dark:text-crm-dm-text-body font-semibold">{stepTitles[currentStep-1]}</span>
-          </p>
-          <div className="mt-1 w-full bg-crm-border dark:bg-crm-dm-border rounded-full h-2">
-            <div 
-              className="bg-crm-accent h-2 rounded-full transition-all duration-300 ease-out" 
-              style={{ width: `${(currentStep / totalSteps) * 100}%` }}
-            ></div>
+      <ViewSwitcher currentView={viewMode} onSwitch={setViewMode} savedCount={savedTests.length} />
+
+      {viewMode === 'savedList' ? (
+          <SavedTestsList tests={savedTests} onLoad={handleLoadTest} onDelete={handleDeleteTest} />
+      ) : (
+          <div className={cardClasses}>
+            <div className="mb-6">
+              <p className="text-sm font-medium text-crm-text-muted dark:text-crm-dm-text-muted">
+                Step {currentStep} of {totalSteps}: <span className="text-crm-text-body dark:text-crm-dm-text-body font-semibold">{stepTitles[currentStep-1]}</span>
+              </p>
+              <div className="mt-1 w-full bg-crm-border dark:bg-crm-dm-border rounded-full h-2">
+                <div 
+                  className="bg-crm-accent h-2 rounded-full transition-all duration-300 ease-out" 
+                  style={{ width: `${(currentStep / totalSteps) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+
+            <div className="min-h-[250px]"> 
+              {isAnalyzing ? <AnalysisLoadingScreen /> : renderStepContent()}
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-crm-border dark:border-crm-dm-border flex justify-between items-center">
+              <button
+                onClick={handlePrevStep}
+                disabled={currentStep === 1 || isAnalyzing}
+                className={secondaryButtonClasses}
+              >
+                Previous
+              </button>
+              {currentStep < totalSteps - 1 ? (
+                <button onClick={handleNextStep} className={buttonClasses} disabled={isAnalyzing}>
+                  Next
+                </button>
+              ) : currentStep === totalSteps -1 ? (
+                 <button onClick={handleNextStep} className={buttonClasses} disabled={isAnalyzing}>
+                  Analyze Test
+                </button>
+              ) : (
+                <button 
+                    onClick={handleSaveTest}
+                    className={buttonClasses}
+                >
+                  Save Test Results
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-
-        <div className="min-h-[250px]"> 
-          {isAnalyzing ? <AnalysisLoadingScreen /> : renderStepContent()}
-        </div>
-
-        <div className="mt-8 pt-6 border-t border-crm-border dark:border-crm-dm-border flex justify-between items-center">
-          <button
-            onClick={handlePrevStep}
-            disabled={currentStep === 1 || isAnalyzing}
-            className={secondaryButtonClasses}
-          >
-            Previous
-          </button>
-          {currentStep < totalSteps ? (
-            <button onClick={handleNextStep} className={buttonClasses} disabled={isAnalyzing}>
-              Next
-            </button>
-          ) : (
-            <button 
-                onClick={() => {
-                    setCurrentStep(1); 
-                    setTestName('');
-                    setVariantsData([createNewVariant(0, 'Variant A'), createNewVariant(1, 'Variant B')].map(v => ({...v, ...initialMetrics}))); 
-                    setControlVariantId('variant-0');
-                    setNextVariantNumericId(2);
-                    setIncludeCommercial(false);
-                    setChannel('email');
-                    setPrimaryEngagementMetric('clickThroughRate');
-                    setConversionMetricName('Purchases'); 
-                    setMetricNameSelectionOption('custom'); 
-                    setCurrency('GBP'); 
-                    setIsReviewDetailsExpanded(false); 
-                    setTestConclusion(null); 
-                }} 
-                className={buttonClasses}
-            >
-              Start New Analysis
-            </button>
-          )}
-        </div>
-      </div>
+        )}
     </div>
   );
 };
