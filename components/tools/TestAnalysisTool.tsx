@@ -1,5 +1,7 @@
 
 
+
+
 import React, { useState, useCallback, useMemo, ChangeEvent, useRef, useEffect } from 'react';
 import { ToolProps } from '../../types';
 import { ArrowLeftIcon, XMarkIcon, BeakerIcon } from '../icons'; // Added BeakerIcon for WIP
@@ -204,6 +206,11 @@ const PerformanceSummaryTable: React.FC<{
   conversionMetricName: string;
   controlVariantId: string;
   testConclusion: TestConclusionData | null;
+  getPerformanceRelativeToControl: (
+    controlValueStr: string | undefined, 
+    challengerValueStr: string | undefined,
+    higherIsBetter?: boolean
+  ) => React.ReactNode;
 }> = ({
   allVariantRates,
   channel,
@@ -213,7 +220,10 @@ const PerformanceSummaryTable: React.FC<{
   conversionMetricName,
   controlVariantId,
   testConclusion,
+  getPerformanceRelativeToControl,
 }) => {
+  const controlRateData = allVariantRates.find(r => r.id === controlVariantId);
+
   const getColumnWinnerId = (
     metricKey: keyof Omit<RateData, 'id' | 'name' | 'sendsRaw' | 'uniqueOpensRaw' | 'uniqueClicksRaw' | 'conversionsRaw' | 'openRateSig' | 'clickThroughRateSig' | 'conversionRateSig'>,
     higherIsBetter: boolean
@@ -286,42 +296,97 @@ const PerformanceSummaryTable: React.FC<{
 
               const winnerClass = isOverallWinner ? 'ring-2 ring-green-500' : isFlatWinner ? 'ring-2 ring-amber-500' : '';
               
-              const renderCell = (value: React.ReactNode, isWinner: boolean) => (
-                <td className={`px-4 py-3 ${isWinner ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
-                  {value}
-                </td>
-              );
-
               return (
                 <tr key={rate.id} className={`${rowClass} border-b last:border-b-0 border-crm-border dark:border-crm-dm-border ${winnerClass}`}>
                   <td className="px-4 py-3 font-semibold text-crm-text-heading dark:text-crm-dm-text-heading whitespace-nowrap">
                     {rate.name}
                     {isControl && <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">(C)</span>}
                   </td>
-                  {renderCell(formatNumberForDisplay(rate.sendsRaw), false)}
-                  {channel === 'email' && renderCell(
-                    <>{formatNumberForDisplay(rate.uniqueOpensRaw)} <br/><span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">({rate.openRate})</span></>,
-                    rate.id === columnWinners.openRate
+                  <td className={`px-4 py-3`}>{formatNumberForDisplay(rate.sendsRaw)}</td>
+                  
+                  {channel === 'email' && (
+                     <td className={`px-4 py-3 ${rate.id === columnWinners.openRate ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                      {formatNumberForDisplay(rate.uniqueOpensRaw)} <br/>
+                      <span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">
+                        ({rate.openRate})
+                      </span>
+                      {!isControl && controlRateData && (
+                        <div className="text-xs font-normal">
+                          {getPerformanceRelativeToControl(controlRateData.openRate, rate.openRate, true)}
+                        </div>
+                      )}
+                    </td>
                   )}
-                  {renderCell(
-                    <>{formatNumberForDisplay(rate.uniqueClicksRaw)} <br/><span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">({rate.clickThroughRate})</span></>,
-                    rate.id === columnWinners.clickThroughRate
-                  )}
+                  
+                  <td className={`px-4 py-3 ${rate.id === columnWinners.clickThroughRate ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                    {formatNumberForDisplay(rate.uniqueClicksRaw)} <br/>
+                    <span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">
+                      ({rate.clickThroughRate})
+                    </span>
+                    {!isControl && controlRateData && (
+                      <div className="text-xs font-normal">
+                        {getPerformanceRelativeToControl(controlRateData.clickThroughRate, rate.clickThroughRate, true)}
+                      </div>
+                    )}
+                  </td>
+
                   {includeCommercial && (
                     is1066ModeActive ? (
                       <>
-                        {renderCell(rate.srrRate, rate.id === columnWinners.srrRate)}
-                        {renderCell(rate.mrrRate, rate.id === columnWinners.mrrRate)}
-                        {renderCell(rate.averageIpp, rate.id === columnWinners.averageIpp)}
-                        {renderCell(rate.cct, rate.id === columnWinners.cct)}
+                        <td className={`px-4 py-3 ${rate.id === columnWinners.srrRate ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                          {rate.srrRate}
+                          {!isControl && controlRateData && (
+                            <div className="text-xs font-normal">
+                              {getPerformanceRelativeToControl(controlRateData.srrRate, rate.srrRate, true)}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`px-4 py-3 ${rate.id === columnWinners.mrrRate ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                          {rate.mrrRate}
+                          {!isControl && controlRateData && (
+                            <div className="text-xs font-normal">
+                              {getPerformanceRelativeToControl(controlRateData.mrrRate, rate.mrrRate, true)}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`px-4 py-3 ${rate.id === columnWinners.averageIpp ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                          {rate.averageIpp}
+                           {!isControl && controlRateData && (
+                            <div className="text-xs font-normal">
+                              {getPerformanceRelativeToControl(controlRateData.averageIpp, rate.averageIpp, true)}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`px-4 py-3 ${rate.id === columnWinners.cct ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                          {rate.cct}
+                           {!isControl && controlRateData && (
+                            <div className="text-xs font-normal">
+                              {getPerformanceRelativeToControl(controlRateData.cct, rate.cct, true)}
+                            </div>
+                          )}
+                        </td>
                       </>
                     ) : (
                       <>
-                        {renderCell(
-                          <>{formatNumberForDisplay(rate.conversionsRaw)} <br/><span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">({rate.conversionRate})</span></>,
-                          rate.id === columnWinners.conversionRate
-                        )}
-                        {renderCell(rate.totalRevenue, rate.id === columnWinners.totalRevenue)}
+                        <td className={`px-4 py-3 ${rate.id === columnWinners.conversionRate ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                          {formatNumberForDisplay(rate.conversionsRaw)} <br/>
+                          <span className="text-xs text-crm-text-muted dark:text-crm-dm-text-muted">
+                            ({rate.conversionRate})
+                          </span>
+                           {!isControl && controlRateData && (
+                            <div className="text-xs font-normal">
+                              {getPerformanceRelativeToControl(controlRateData.conversionRate, rate.conversionRate, true)}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`px-4 py-3 ${rate.id === columnWinners.totalRevenue ? 'font-bold text-green-600 dark:text-green-400' : ''}`}>
+                          {rate.totalRevenue}
+                           {!isControl && controlRateData && (
+                            <div className="text-xs font-normal">
+                              {getPerformanceRelativeToControl(controlRateData.totalRevenue, rate.totalRevenue, true)}
+                            </div>
+                          )}
+                        </td>
                       </>
                     )
                   )}
@@ -332,7 +397,7 @@ const PerformanceSummaryTable: React.FC<{
         </table>
       </div>
        <p className="mt-2 text-xs text-crm-text-muted dark:text-crm-dm-text-muted">
-         <span className="font-bold text-green-600 dark:text-green-400">Bold</span> indicates the winning variant for that metric column. A <span className="p-0.5 rounded ring-2 ring-green-500">green outline</span> indicates the overall test winner. (C) denotes the control variant.
+         <span className="font-bold text-green-600 dark:text-green-400">Bold</span> indicates the winning variant for that metric column. A <span className="p-0.5 rounded ring-2 ring-green-500">green outline</span> indicates the overall test winner. (C) denotes the control variant. For other variants, colored percentages e.g., <span className="text-green-500">(+10.5%)</span> show the performance change relative to the control.
        </p>
     </div>
   );
@@ -1576,6 +1641,7 @@ const TestAnalysisTool: React.FC<ToolProps> = ({ onClose, theme }) => {
                 conversionMetricName={conversionMetricName}
                 controlVariantId={controlVariantId}
                 testConclusion={testConclusion}
+                getPerformanceRelativeToControl={getPerformanceRelativeToControl}
             />
 
             <div>
